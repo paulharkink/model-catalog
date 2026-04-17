@@ -1,0 +1,17 @@
+services:
+  vllm:
+    build: .
+    image: local/vllm-gemma4:0.19.0
+    network_mode: host
+    ipc: host
+    environment:
+      VLLM_NVFP4_GEMM_BACKEND: marlin
+      HF_HOME: /models
+      HF_HUB_CACHE: /models
+    volumes:
+      - ${HOME}/models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]

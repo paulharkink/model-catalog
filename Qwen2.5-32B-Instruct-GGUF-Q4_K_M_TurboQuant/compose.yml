@@ -1,0 +1,11 @@
+services:
+  llama:
+    build: .
+    image: docker.internal.phis.nl/qwen25-turboquant:cuda-12.8.1
+    container_name: qwen25-turboquant
+    network_mode: host
+    ipc: host
+    gpus: all
+    volumes:
+      - ${HOME}/models:/models
+    restart: unless-stopped

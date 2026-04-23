@@ -1,0 +1,123 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: model-catalog-build
+  namespace: ci
+spec:
+  params:
+    - name: repo_url
+      type: string
+    - name: revision
+      type: string
+  workspaces:
+    - name: source
+  tasks:
+    - name: build-and-push
+      taskSpec:
+        params:
+          - name: repo_url
+            type: string
+          - name: revision
+            type: string
+        workspaces:
+          - name: source
+        volumes:
+          - name: github-app
+            secret:
+              secretName: ci-github-app
+          - name: github-helper
+            configMap:
+              name: github-app-helper
+              defaultMode: 0755
+          - name: docker-config
+            secret:
+              secretName: docker-internal-registry
+              items:
+                - key: .dockerconfigjson
+                  path: config.json
+        steps:
+          - name: clone
+            image: alpine/git:2.45.2
+            computeResources:
+              requests: { cpu: "250m", memory: "256Mi" }
+              limits: { cpu: "1", memory: "1Gi" }
+            volumeMounts:
+              - name: github-app
+                mountPath: /var/secrets/github-app
+              - name: github-helper
+                mountPath: /helpers
+            script: |
+              set -eux
+              apk add --no-cache openssl curl jq >/dev/null 2>&1
+              TOKEN=$(/helpers/github-app-token.sh /var/secrets/github-app)
+              REPO_PATH=$(printf "%s" "$(params.repo_url)" | sed -e 's#^https://github.com/##' -e 's#^git@github.com:##' -e 's#\.git$##')
+              CLONE_URL="https://x-access-token:${TOKEN}@github.com/${REPO_PATH}.git"
+              rm -rf "$(workspaces.source.path)/src"
+              git clone "${CLONE_URL}" "$(workspaces.source.path)/src"
+              cd "$(workspaces.source.path)/src"
+              git checkout "$(params.revision)"
+          - name: build-and-push-qwen36-nvfp4
+            image: gcr.io/kaniko-project/executor:debug
+            computeResources:
+              requests: { cpu: "2", memory: "4Gi" }
+              limits: { cpu: "8", memory: "16Gi" }
+            env:
+              - name: DOCKER_CONFIG
+                value: /kaniko/.docker
+            volumeMounts:
+              - name: docker-config
+                mountPath: /kaniko/.docker
+            command: ["/busybox/sh", "-c"]
+            args:
+              - |
+                set -eux
+                # Extract destination tag from compose.yml image field
+                DEST=$(grep 'image:' /workspace/source/src/Qwen3.6-27B-NVFP4/compose.yml | awk '{print $2}')
+                /kaniko/executor \
+                  --dockerfile=/workspace/source/src/Qwen3.6-27B-NVFP4/Dockerfile \
+                  --context=/workspace/source/src/Qwen3.6-27B-NVFP4 \
+                  --destination="${DEST}" \
+                  --skip-tls-verify \
+                  --cache=false
+      params:
+        - name: repo_url
+          value: $(params.repo_url)
+        - name: revision
+          value: $(params.revision)
+      workspaces:
+        - name: source
+          workspace: source
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: model-catalog-build-main-
+  namespace: ci
+  annotations:
+    pipelinesascode.tekton.dev/on-cel-expression: 'event == "push" && (target_branch == "main" || target_branch == "refs/heads/main")'
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+spec:
+  pipelineRef:
+    name: model-catalog-build
+  taskRunTemplate:
+    serviceAccountName: tekton-runner
+    podTemplate:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/gpu-worker
+                    operator: Exists
+  params:
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  workspaces:
+    - name: source
+      emptyDir: {}

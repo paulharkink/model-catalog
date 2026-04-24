@@ -101,6 +101,28 @@ spec:
                   --destination="${DEST}" \
                   --skip-tls-verify \
                   --cache=false
+          - name: build-and-push-qwen35-122b-a10b-nvfp4
+            image: gcr.io/kaniko-project/executor:debug
+            computeResources:
+              requests: { cpu: "2", memory: "4Gi" }
+              limits: { cpu: "8", memory: "16Gi" }
+            env:
+              - name: DOCKER_CONFIG
+                value: /kaniko/.docker
+            volumeMounts:
+              - name: docker-config
+                mountPath: /kaniko/.docker
+            command: ["/busybox/sh", "-c"]
+            args:
+              - |
+                set -eux
+                DEST=$(grep 'image:' /workspace/source/src/Qwen3.5-122B-A10B-NVFP4/compose.yml | awk '{print $2}')
+                /kaniko/executor \
+                  --dockerfile=/workspace/source/src/Qwen3.5-122B-A10B-NVFP4/Dockerfile \
+                  --context=/workspace/source/src/Qwen3.5-122B-A10B-NVFP4 \
+                  --destination="${DEST}" \
+                  --skip-tls-verify \
+                  --cache=false
       params:
         - name: repo_url
           value: $(params.repo_url)

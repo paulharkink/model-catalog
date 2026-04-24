@@ -1,0 +1,17 @@
+services:
+  vllm:
+    build: .
+    image: docker.internal.phis.nl/vllm-qwen35-122b-a10b-nvfp4:0.19.1
+    platform: linux/arm64
+    network_mode: host
+    ipc: host
+    environment:
+      HF_HOME: /models
+      HF_HUB_CACHE: /models
+    volumes:
+      - ${HOME}/models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]

@@ -144,14 +144,10 @@ spec:
               requests: { cpu: "2", memory: "8Gi" }
               limits: { cpu: "4", memory: "16Gi" }
             env:
-              - name: HOME
-                value: /home/pharkink
-              - name: USER
-                value: pharkink
               - name: HF_HOME
-                value: /home/pharkink/models
+                value: /mnt/models
               - name: HF_HUB_CACHE
-                value: /home/pharkink/models
+                value: /mnt/models
               - name: DOCKER_HOST
                 value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG
@@ -164,7 +160,7 @@ spec:
               - name: docker-socket
                 mountPath: /var/run/docker.sock
               - name: models
-                mountPath: /home/pharkink/models
+                mountPath: /mnt/models
               - name: docker-config
                 mountPath: /docker-config
               - name: pip-cache

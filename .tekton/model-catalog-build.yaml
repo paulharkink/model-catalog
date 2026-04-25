@@ -148,6 +148,10 @@ spec:
                 value: /home/pharkink
               - name: USER
                 value: pharkink
+              - name: HF_HOME
+                value: /home/pharkink/models
+              - name: HF_HUB_CACHE
+                value: /home/pharkink/models
               - name: DOCKER_HOST
                 value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG

@@ -56,7 +56,7 @@ spec:
               IMAGE="docker.internal.phis.nl/vllm-eugr:${SHORT}-${HASH}"
               printf '%s' "${IMAGE}" > /tekton/results/image
               mkdir -p "$(workspaces.eugr.path)/meta"
-              printf '%s' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
+              printf '%s\n' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
 
               AUTH=$(python3 -c "import json; d=json.load(open('/docker-config/config.json')); print(d['auths']['docker.internal.phis.nl']['auth'])" 2>/dev/null || echo "")
               STATUS="000"
@@ -69,11 +69,11 @@ spec:
 
               if [ "${STATUS}" = "200" ]; then
                 echo "vllm-eugr ${IMAGE} already in nexus, no build needed."
-                printf 'true' > "$(workspaces.eugr.path)/meta/skip"
+                printf 'true\n' > "$(workspaces.eugr.path)/meta/skip"
                 exit 0
               fi
 
-              printf 'false' > "$(workspaces.eugr.path)/meta/skip"
+              printf 'false\n' > "$(workspaces.eugr.path)/meta/skip"
               TOKEN=$(/helpers/github-app-token.sh /var/secrets/github-app)
               rm -rf "$(workspaces.eugr.path)/src"
               git clone "https://x-access-token:${TOKEN}@github.com/eugr/spark-vllm-docker.git" \
@@ -116,10 +116,7 @@ spec:
                   --context="$(workspaces.eugr.path)/src" \
                   --destination="${IMAGE}" \
                   --skip-tls-verify \
-                  --cache=false || {
-                    echo "WARNING: vllm-eugr build failed — INT4FP8 images will not be built this run."
-                    exit 0
-                  }
+                  --cache=false
       workspaces:
         - name: eugr
           workspace: eugr

@@ -77,7 +77,7 @@ spec:
               IMAGE="docker.internal.phis.nl/vllm-eugr:${SHORT}-${HASH}"
               printf '%s' "${IMAGE}" > /tekton/results/image
               mkdir -p "$(workspaces.eugr.path)/meta"
-              printf '%s' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
+              printf '%s\n' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
 
               AUTH=$(python3 -c "import json; d=json.load(open('/docker-config/config.json')); print(d['auths']['docker.internal.phis.nl']['auth'])" 2>/dev/null || echo "")
               STATUS="000"
@@ -91,12 +91,12 @@ spec:
               if [ "${STATUS}" = "200" ]; then
                 echo "Image ${IMAGE} already exists in nexus, skipping build."
                 printf 'true' > /tekton/results/skip
-                printf 'true' > "$(workspaces.eugr.path)/meta/skip"
+                printf 'true\n' > "$(workspaces.eugr.path)/meta/skip"
                 exit 0
               fi
 
               printf 'false' > /tekton/results/skip
-              printf 'false' > "$(workspaces.eugr.path)/meta/skip"
+              printf 'false\n' > "$(workspaces.eugr.path)/meta/skip"
 
               TOKEN=$(/helpers/github-app-token.sh /var/secrets/github-app)
               rm -rf "$(workspaces.eugr.path)/src"

@@ -1,0 +1,23 @@
+services:
+  model-prep:
+    build: prep/
+    volumes:
+      - ${HOME}/models:/models
+    environment:
+      HF_HOME: /models
+  vllm:
+    build: .
+    image: docker.internal.phis.nl/vllm-qwen35-122b-int4fp8:0.19.0
+    platform: linux/arm64
+    network_mode: host
+    ipc: host
+    depends_on:
+      model-prep:
+        condition: service_completed_successfully
+    volumes:
+      - ${HOME}/models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]

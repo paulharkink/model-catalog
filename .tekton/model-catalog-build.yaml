@@ -142,6 +142,8 @@ spec:
             env:
               - name: HOME
                 value: /home/pharkink
+              - name: USER
+                value: pharkink
               - name: DOCKER_HOST
                 value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG
@@ -155,7 +157,7 @@ spec:
                 mountPath: /docker-config
             script: |
               set -eux
-              apk add --no-cache git bash >/dev/null 2>&1
+              apk add --no-cache git bash python3 curl >/dev/null 2>&1
 
               # All version pins come from versions.env in the checked-out repo
               . "$(workspaces.source.path)/src/versions.env"

@@ -148,6 +148,11 @@ spec:
                 value: /mnt/models
               - name: HF_HUB_CACHE
                 value: /mnt/models
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: ai-huggingface-token
+                    key: access_token
               - name: DOCKER_HOST
                 value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG

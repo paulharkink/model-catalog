@@ -39,10 +39,6 @@ spec:
             hostPath:
               path: /var/run/docker.sock
               type: Socket
-          - name: models
-            hostPath:
-              path: /home/pharkink/models
-              type: Directory
         steps:
           - name: clone
             image: alpine/git:2.45.2
@@ -140,10 +136,6 @@ spec:
               requests: { cpu: "2", memory: "4Gi" }
               limits: { cpu: "4", memory: "8Gi" }
             env:
-              - name: HOME
-                value: /home/pharkink
-              - name: USER
-                value: pharkink
               - name: DOCKER_HOST
                 value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG
@@ -151,50 +143,24 @@ spec:
             volumeMounts:
               - name: docker-socket
                 mountPath: /var/run/docker.sock
-              - name: models
-                mountPath: /home/pharkink/models
               - name: docker-config
                 mountPath: /docker-config
             script: |
               set -eux
-              apk add --no-cache git bash python3 curl >/dev/null 2>&1
 
               # All version pins come from versions.env in the checked-out repo
               . "$(workspaces.source.path)/src/versions.env"
               NEXUS_TAG=$(printf '%s' "${ALBOND_INT4FP8_TAG}" | tr '[:upper:]' '[:lower:]')
 
-              # Pre-pull cached images from nexus → retag to what install.sh expects
-              # install.sh skips a build step if the expected image already exists locally
-              docker pull "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" 2>/dev/null \
-                && docker tag "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" vllm-sm121:latest \
-                || echo "vllm-sm121 not cached in nexus, will build"
-              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0 2>/dev/null \
-                && docker tag docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0 vllm-qwen35-v2:latest \
-                || echo "vllm-qwen35-v2 not cached in nexus, will build"
-              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0 2>/dev/null \
-                && docker tag docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0 vllm-qwen35-v2-tq:latest \
-                || echo "vllm-qwen35-v2-tq not cached in nexus, will build"
+              # Pull images from nexus. Fails loudly if any are missing — build them manually
+              # via albond's install.sh on sparky first, then push to nexus under these names.
+              docker pull "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
+              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
+              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
 
-              # Clone albond's repo at the declared tag
-              rm -rf /tmp/albond
-              git clone https://github.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4.git /tmp/albond
-              cd /tmp/albond
-              git checkout "${ALBOND_INT4FP8_TAG}"
-
-              # Run install.sh verbatim — skips all steps whose output already exists
-              bash ./install.sh --no-launch
-
-              # Build TQ variant (install.sh only builds v2, not v2-tq)
-              if ! docker image inspect vllm-qwen35-v2-tq:latest >/dev/null 2>&1; then
-                docker build -t vllm-qwen35-v2-tq -f docker/Dockerfile.v2-tq .
-              fi
-
-              # Retag and push to nexus
-              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
+              # Push back to confirm they're available at the canonical names (idempotent)
               docker push "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
-              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
               docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
-              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
               docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
 
           - name: helm-push

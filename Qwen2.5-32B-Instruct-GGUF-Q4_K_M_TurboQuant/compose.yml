@@ -1,7 +1,7 @@
 services:
   llama:
     build: .
-    image: docker.internal.phis.nl/qwen25-turboquant:cuda-12.8.1
+    image: docker.internal.phis.nl/qwen2_5_32b_q4km_tq_llamacpp:cuda-12.8.1
     container_name: qwen25-turboquant
     network_mode: host
     ipc: host

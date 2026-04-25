@@ -1,7 +1,7 @@
 services:
   vllm:
     build: .
-    image: local/vllm-gemma4:0.19.0
+    image: docker.internal.phis.nl/gemma4_26b_a4b_nvfp4_vllm:0.19.0
     network_mode: host
     ipc: host
     environment:

@@ -11,125 +11,13 @@ spec:
       type: string
   workspaces:
     - name: source
-    - name: eugr
   tasks:
-    - name: ensure-vllm-eugr
-      taskSpec:
-        workspaces:
-          - name: eugr
-        volumes:
-          - name: github-app
-            secret:
-              secretName: ci-github-app
-          - name: github-helper
-            configMap:
-              name: github-app-helper
-              defaultMode: 0755
-          - name: docker-config
-            secret:
-              secretName: docker-internal-registry
-              items:
-                - key: .dockerconfigjson
-                  path: config.json
-        results:
-          - name: image
-            description: vllm-eugr image label for INT4FP8 builds
-        steps:
-          - name: check-and-prepare
-            image: alpine/git:2.45.2
-            computeResources:
-              requests: { cpu: "250m", memory: "256Mi" }
-              limits: { cpu: "1", memory: "1Gi" }
-            volumeMounts:
-              - name: github-app
-                mountPath: /var/secrets/github-app
-              - name: github-helper
-                mountPath: /helpers
-              - name: docker-config
-                mountPath: /docker-config
-            script: |
-              set -eux
-              apk add --no-cache openssl curl jq python3 >/dev/null 2>&1
-              SHORT=49d6d9fe
-              PATCH_COMMANDS='["sed -i '"'"'/^# TEMPORARY PATCH for broken FP8 kernels/,/rm pr35568.diff/d'"'"' Dockerfile","sed -i '"'"'/^# TEMPORARY PATCH for broken compilation/,/rm pr38919.diff/d'"'"' Dockerfile","sed -i '"'"'s|whl/nightly/cu130|whl/nightly/20260408/cu130|g'"'"' Dockerfile","sed -i '"'"'/^ENV TORCH_CUDA_ARCH_LIST=/a ENV NVCC_APPEND_FLAGS=\"-t 4\"'"'"' Dockerfile"]'
-              HASH=$(printf '%s' "${PATCH_COMMANDS}" | sha256sum | cut -c1-8)
-              IMAGE="docker.internal.phis.nl/vllm-eugr:${SHORT}-${HASH}"
-              printf '%s' "${IMAGE}" > /tekton/results/image
-              mkdir -p "$(workspaces.eugr.path)/meta"
-              printf '%s\n' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
-
-              AUTH=$(python3 -c "import json; d=json.load(open('/docker-config/config.json')); print(d['auths']['docker.internal.phis.nl']['auth'])" 2>/dev/null || echo "")
-              STATUS="000"
-              if [ -n "${AUTH}" ]; then
-                STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-                  -H "Authorization: Basic ${AUTH}" \
-                  -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-                  "https://docker.internal.phis.nl/v2/vllm-eugr/manifests/${SHORT}-${HASH}" 2>/dev/null || echo "000")
-              fi
-
-              if [ "${STATUS}" = "200" ]; then
-                echo "vllm-eugr ${IMAGE} already in nexus, no build needed."
-                printf 'true\n' > "$(workspaces.eugr.path)/meta/skip"
-                exit 0
-              fi
-
-              printf 'false\n' > "$(workspaces.eugr.path)/meta/skip"
-              TOKEN=$(/helpers/github-app-token.sh /var/secrets/github-app)
-              rm -rf "$(workspaces.eugr.path)/src"
-              git clone "https://x-access-token:${TOKEN}@github.com/eugr/spark-vllm-docker.git" \
-                "$(workspaces.eugr.path)/src"
-              cd "$(workspaces.eugr.path)/src"
-              git checkout 49d6d9fefd7cd05e63af8b28e4b514e9d30d249f
-              printf '%s' "${PATCH_COMMANDS}" | python3 -c "
-              import json, sys, subprocess
-              for cmd in json.load(sys.stdin):
-                  print('Applying:', cmd)
-                  subprocess.run(['sh', '-c', cmd], check=True)
-              " || { echo 'Patch application failed'; exit 1; }
-
-          - name: build
-            image: gcr.io/kaniko-project/executor:debug
-            computeResources:
-              requests: { cpu: "4", memory: "16Gi" }
-              limits: { cpu: "8", memory: "32Gi" }
-            timeout: 5400s
-            env:
-              - name: DOCKER_CONFIG
-                value: /kaniko/.docker
-            volumeMounts:
-              - name: docker-config
-                mountPath: /kaniko/.docker
-            command: ["/busybox/sh", "-c"]
-            args:
-              - |
-                set -eux
-                read -r SKIP < "$(workspaces.eugr.path)/meta/skip" || SKIP=false
-                echo "SKIP=${SKIP}"
-                if [ "${SKIP}" = "true" ]; then
-                  echo "vllm-eugr image already exists, skipping build."
-                  exit 0
-                fi
-                read -r IMAGE < "$(workspaces.eugr.path)/meta/image"
-                echo "Building ${IMAGE}"
-                /kaniko/executor \
-                  --dockerfile="$(workspaces.eugr.path)/src/Dockerfile" \
-                  --context="$(workspaces.eugr.path)/src" \
-                  --destination="${IMAGE}" \
-                  --skip-tls-verify \
-                  --cache=false
-      workspaces:
-        - name: eugr
-          workspace: eugr
-
     - name: build-and-push
-      runAfter: [ensure-vllm-eugr]
       taskSpec:
         params:
           - name: repo_url
             type: string
           - name: revision
-            type: string
-          - name: vllm_eugr_image
             type: string
         workspaces:
           - name: source
@@ -147,6 +35,14 @@ spec:
               items:
                 - key: .dockerconfigjson
                   path: config.json
+          - name: docker-socket
+            hostPath:
+              path: /var/run/docker.sock
+              type: Socket
+          - name: models
+            hostPath:
+              path: /home/pharkink/models
+              type: Directory
         steps:
           - name: clone
             image: alpine/git:2.45.2
@@ -238,75 +134,66 @@ spec:
                   --skip-tls-verify \
                   --cache=false
 
-          - name: build-and-push-qwen35-122b-int4fp8
-            image: gcr.io/kaniko-project/executor:debug
+          - name: build-and-push-int4fp8
+            image: docker:latest
             computeResources:
               requests: { cpu: "2", memory: "4Gi" }
-              limits: { cpu: "8", memory: "16Gi" }
+              limits: { cpu: "4", memory: "8Gi" }
             env:
+              - name: HOME
+                value: /home/pharkink
+              - name: DOCKER_HOST
+                value: unix:///var/run/docker.sock
               - name: DOCKER_CONFIG
-                value: /kaniko/.docker
+                value: /docker-config
             volumeMounts:
+              - name: docker-socket
+                mountPath: /var/run/docker.sock
+              - name: models
+                mountPath: /home/pharkink/models
               - name: docker-config
-                mountPath: /kaniko/.docker
-            command: ["/busybox/sh", "-c"]
-            args:
-              - |
-                set -eux
-                DEST=$(grep 'image:' /workspace/source/src/Qwen3.5-122B-A10B-INT4FP8/compose.yml | awk '{print $2}')
-                /kaniko/executor \
-                  --dockerfile=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8/Dockerfile \
-                  --context=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8 \
-                  --build-arg "BASE_IMAGE=$(params.vllm_eugr_image)" \
-                  --destination="${DEST}" \
-                  --skip-tls-verify \
-                  --cache=false
+                mountPath: /docker-config
+            script: |
+              set -eux
+              apk add --no-cache git >/dev/null 2>&1
 
-          - name: build-and-push-qwen35-122b-int4fp8-tq
-            image: gcr.io/kaniko-project/executor:debug
-            computeResources:
-              requests: { cpu: "2", memory: "4Gi" }
-              limits: { cpu: "8", memory: "16Gi" }
-            env:
-              - name: DOCKER_CONFIG
-                value: /kaniko/.docker
-            volumeMounts:
-              - name: docker-config
-                mountPath: /kaniko/.docker
-            command: ["/busybox/sh", "-c"]
-            args:
-              - |
-                set -eux
-                DEST=$(grep 'image:' /workspace/source/src/Qwen3.5-122B-A10B-INT4FP8-TQ/compose.yml | awk '{print $2}')
-                /kaniko/executor \
-                  --dockerfile=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8-TQ/Dockerfile \
-                  --context=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8-TQ \
-                  --build-arg "BASE_IMAGE=$(params.vllm_eugr_image)" \
-                  --destination="${DEST}" \
-                  --skip-tls-verify \
-                  --cache=false
+              # All version pins come from versions.env in the checked-out repo
+              . "$(workspaces.source.path)/src/versions.env"
+              NEXUS_TAG=$(printf '%s' "${ALBOND_INT4FP8_TAG}" | tr '[:upper:]' '[:lower:]')
 
-          - name: build-and-push-qwen35-122b-int4fp8-prep
-            image: gcr.io/kaniko-project/executor:debug
-            computeResources:
-              requests: { cpu: "2", memory: "4Gi" }
-              limits: { cpu: "8", memory: "16Gi" }
-            env:
-              - name: DOCKER_CONFIG
-                value: /kaniko/.docker
-            volumeMounts:
-              - name: docker-config
-                mountPath: /kaniko/.docker
-            command: ["/busybox/sh", "-c"]
-            args:
-              - |
-                set -eux
-                /kaniko/executor \
-                  --dockerfile=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8/prep/Dockerfile \
-                  --context=/workspace/source/src/Qwen3.5-122B-A10B-INT4FP8/prep \
-                  --destination=docker.internal.phis.nl/vllm-qwen35-122b-int4fp8-prep:0.19.0 \
-                  --skip-tls-verify \
-                  --cache=false
+              # Pre-pull cached images from nexus → retag to what install.sh expects
+              # install.sh skips a build step if the expected image already exists locally
+              docker pull "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" 2>/dev/null \
+                && docker tag "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" vllm-sm121:latest \
+                || echo "vllm-sm121 not cached in nexus, will build"
+              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0 2>/dev/null \
+                && docker tag docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0 vllm-qwen35-v2:latest \
+                || echo "vllm-qwen35-v2 not cached in nexus, will build"
+              docker pull docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0 2>/dev/null \
+                && docker tag docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0 vllm-qwen35-v2-tq:latest \
+                || echo "vllm-qwen35-v2-tq not cached in nexus, will build"
+
+              # Clone albond's repo at the declared tag
+              rm -rf /tmp/albond
+              git clone https://github.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4.git /tmp/albond
+              cd /tmp/albond
+              git checkout "${ALBOND_INT4FP8_TAG}"
+
+              # Run install.sh verbatim — skips all steps whose output already exists
+              sh ./install.sh --no-launch
+
+              # Build TQ variant (install.sh only builds v2, not v2-tq)
+              if ! docker image inspect vllm-qwen35-v2-tq:latest >/dev/null 2>&1; then
+                docker build -t vllm-qwen35-v2-tq -f docker/Dockerfile.v2-tq .
+              fi
+
+              # Retag and push to nexus
+              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
+              docker push "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
+              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
+              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
+              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
+              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
 
           - name: helm-push
             image: alpine/helm:3.17.0
@@ -333,8 +220,6 @@ spec:
           value: $(params.repo_url)
         - name: revision
           value: $(params.revision)
-        - name: vllm_eugr_image
-          value: $(tasks.ensure-vllm-eugr.results.image)
       workspaces:
         - name: source
           workspace: source
@@ -371,6 +256,4 @@ spec:
       value: "{{ revision }}"
   workspaces:
     - name: source
-      emptyDir: {}
-    - name: eugr
       emptyDir: {}

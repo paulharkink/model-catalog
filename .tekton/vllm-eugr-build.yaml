@@ -6,19 +6,13 @@ metadata:
   annotations:
     description: |
       Manually-triggered pipeline to build and push a vllm-eugr base image.
-      Image label: docker.internal.phis.nl/vllm-eugr:<commit_short>-<patches_hash>
+      Image label: docker.internal.phis.nl/vllm-eugr:<vllm_ref> (e.g. vllm-eugr:0.19.0)
       Idempotent: skips build if image already exists in nexus.
 spec:
   params:
-    - name: commit
+    - name: vllm_ref
       type: string
-      description: eugr/spark-vllm-docker git commit hash
-    - name: torch_nightly_date
-      type: string
-      description: PyTorch nightly date string (e.g., 20260408)
-    - name: patch_commands
-      type: string
-      description: JSON array of sh commands to apply to Dockerfile before build
+      description: git ref to check out from eugr/spark-vllm-docker (e.g. v0.19.0)
   workspaces:
     - name: eugr
   results:
@@ -29,11 +23,7 @@ spec:
     - name: check-and-prepare
       taskSpec:
         params:
-          - name: commit
-            type: string
-          - name: torch_nightly_date
-            type: string
-          - name: patch_commands
+          - name: vllm_ref
             type: string
         workspaces:
           - name: eugr
@@ -72,9 +62,8 @@ spec:
             script: |
               set -eux
               apk add --no-cache openssl curl jq python3 >/dev/null 2>&1
-              SHORT=$(printf '%s' "$(params.commit)" | cut -c1-8)
-              HASH=$(printf '%s' '$(params.patch_commands)' | sha256sum | cut -c1-8)
-              IMAGE="docker.internal.phis.nl/vllm-eugr:${SHORT}-${HASH}"
+              REF=$(printf '%s' "$(params.vllm_ref)" | sed 's/^v//')
+              IMAGE="docker.internal.phis.nl/vllm-eugr:${REF}"
               printf '%s' "${IMAGE}" > /tekton/results/image
               mkdir -p "$(workspaces.eugr.path)/meta"
               printf '%s\n' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
@@ -85,7 +74,7 @@ spec:
                 STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
                   -H "Authorization: Basic ${AUTH}" \
                   -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-                  "https://docker.internal.phis.nl/v2/vllm-eugr/manifests/${SHORT}-${HASH}" 2>/dev/null || echo "000")
+                  "https://docker.internal.phis.nl/v2/vllm-eugr/manifests/${REF}" 2>/dev/null || echo "000")
               fi
 
               if [ "${STATUS}" = "200" ]; then
@@ -103,25 +92,10 @@ spec:
               git clone "https://x-access-token:${TOKEN}@github.com/eugr/spark-vllm-docker.git" \
                 "$(workspaces.eugr.path)/src"
               cd "$(workspaces.eugr.path)/src"
-              git checkout "$(params.commit)"
-
-              printf '%s' '$(params.patch_commands)' | python3 -c "
-              import json, sys, subprocess
-              cmds = json.load(sys.stdin)
-              for cmd in cmds:
-                  print('Applying:', cmd)
-                  subprocess.run(['sh', '-c', cmd], check=True)
-              " || { echo 'Patch application failed'; exit 1; }
-
-              printf 'build_date: $(params.torch_nightly_date)\ncommit: $(params.commit)\n' \
-                > "$(workspaces.eugr.path)/src/build-metadata.yaml"
+              git checkout "$(params.vllm_ref)"
       params:
-        - name: commit
-          value: $(params.commit)
-        - name: torch_nightly_date
-          value: $(params.torch_nightly_date)
-        - name: patch_commands
-          value: $(params.patch_commands)
+        - name: vllm_ref
+          value: $(params.vllm_ref)
       workspaces:
         - name: eugr
           workspace: eugr
@@ -173,12 +147,12 @@ spec:
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: vllm-eugr-build-int4fp8-
+  generateName: vllm-eugr-build-
   namespace: ci
   annotations:
     description: |
-      Manual trigger example for the INT4FP8 vllm-eugr base image.
-      Run: kubectl create -f this-file (with generateName it creates a new PipelineRun each time).
+      Manual trigger for building a vllm-eugr base image.
+      Run: kubectl create -f this-file (generateName creates a new PipelineRun each time).
 spec:
   pipelineRef:
     name: vllm-eugr-build
@@ -197,13 +171,8 @@ spec:
                   - key: node-role.kubernetes.io/gpu-worker
                     operator: Exists
   params:
-    - name: commit
-      value: "49d6d9fefd7cd05e63af8b28e4b514e9d30d249f"
-    - name: torch_nightly_date
-      value: "20260408"
-    - name: patch_commands
-      value: |
-        ["sed -i '/^# TEMPORARY PATCH for broken FP8 kernels/,/rm pr35568.diff/d' Dockerfile","sed -i '/^# TEMPORARY PATCH for broken compilation/,/rm pr38919.diff/d' Dockerfile","sed -i 's|whl/nightly/cu130|whl/nightly/20260408/cu130|g' Dockerfile","sed -i '/^ENV TORCH_CUDA_ARCH_LIST=/a ENV NVCC_APPEND_FLAGS=\"-t 4\"' Dockerfile"]
+    - name: vllm_ref
+      value: "v0.19.0"
   workspaces:
     - name: eugr
       emptyDir: {}

@@ -144,10 +144,14 @@ spec:
               requests: { cpu: "2", memory: "8Gi" }
               limits: { cpu: "4", memory: "16Gi" }
             env:
+              - name: HOME
+                value: /root
+              - name: USER
+                value: root
               - name: HF_HOME
-                value: /mnt/models
+                value: /root/models
               - name: HF_HUB_CACHE
-                value: /mnt/models
+                value: /root/models
               - name: HF_TOKEN
                 valueFrom:
                   secretKeyRef:
@@ -165,7 +169,7 @@ spec:
               - name: docker-socket
                 mountPath: /var/run/docker.sock
               - name: models
-                mountPath: /mnt/models
+                mountPath: /root/models
               - name: docker-config
                 mountPath: /docker-config
               - name: pip-cache

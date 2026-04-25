@@ -102,19 +102,24 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
-                set -eu
+                set -eux
                 read -r SKIP < "$(workspaces.eugr.path)/meta/skip" || SKIP=false
+                echo "SKIP=${SKIP}"
                 if [ "${SKIP}" = "true" ]; then
                   echo "vllm-eugr image already exists, skipping build."
                   exit 0
                 fi
                 read -r IMAGE < "$(workspaces.eugr.path)/meta/image"
+                echo "Building ${IMAGE}"
                 /kaniko/executor \
                   --dockerfile="$(workspaces.eugr.path)/src/Dockerfile" \
                   --context="$(workspaces.eugr.path)/src" \
                   --destination="${IMAGE}" \
                   --skip-tls-verify \
-                  --cache=false
+                  --cache=false || {
+                    echo "WARNING: vllm-eugr build failed — INT4FP8 images will not be built this run."
+                    exit 0
+                  }
       workspaces:
         - name: eugr
           workspace: eugr

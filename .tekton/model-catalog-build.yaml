@@ -80,7 +80,8 @@ spec:
                   "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4" \
                   "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" \
                   "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4" \
-                  "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"
+                  "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq" \
+                  "$(workspaces.source.path)/meta/build-flags/helm-push"
               else
                 CHANGED=$(git diff --name-only "${PREV}" HEAD)
                 echo "Changed files: ${CHANGED}"
@@ -90,6 +91,7 @@ spec:
                 echo "${CHANGED}" | grep -q '^Qwen3\.5-122B-A10B-INT4FP8' && touch "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" || true
                 echo "${CHANGED}" | grep -q '^Gemma-4-26B-A4B-it-NVFP4/'  && touch "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4"     || true
                 echo "${CHANGED}" | grep -q '^Qwen2\.5-32B-Instruct-GGUF' && touch "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"  || true
+                echo "${CHANGED}" | grep -q '^Chart\.yaml$'               && touch "$(workspaces.source.path)/meta/build-flags/helm-push"                 || true
               fi
               echo "Build flags set:"
               ls "$(workspaces.source.path)/meta/build-flags/" || echo "(none)"
@@ -266,6 +268,7 @@ spec:
               - name: docker-config
                 mountPath: /helm-docker
             script: |
+              [ ! -f "$(workspaces.source.path)/meta/build-flags/helm-push" ] && { echo "Skipping helm-push — Chart.yaml unchanged"; exit 0; } || true
               set -eux
               mkdir -p /tmp/charts
               helm package "$(workspaces.source.path)/src" --destination /tmp/charts
@@ -287,7 +290,7 @@ metadata:
   generateName: model-catalog-build-main-
   namespace: ci
   annotations:
-    pipelinesascode.tekton.dev/on-cel-expression: 'event == "push" && (target_branch == "main" || target_branch == "refs/heads/main")'
+    pipelinesascode.tekton.dev/on-cel-expression: 'event == "push" && target_branch == "main"'
     pipelinesascode.tekton.dev/max-keep-runs: "5"
 spec:
   pipelineRef:

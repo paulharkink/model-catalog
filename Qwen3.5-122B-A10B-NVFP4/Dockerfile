@@ -1,4 +1,4 @@
-FROM docker.internal.phis.nl/vllm-eugr:v0.19.0
+FROM docker.internal.phis.nl/vllm-eugr:v0.20.1
 
 ENV HF_HOME=/models
 ENV HF_HUB_CACHE=/models

@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=docker.internal.phis.nl/vllm-eugr:v0.19.0
+ARG BASE_IMAGE=docker.internal.phis.nl/vllm-eugr:v0.20.1
 FROM ${BASE_IMAGE}
 
 ARG ALBOND_COMMIT=42699e6a4bffecbf43ee3f26436c067eceb2a4aa

@@ -1,4 +1,4 @@
-FROM docker.internal.phis.nl/vllm-node-spark:latest
+FROM docker.internal.phis.nl/vllm-eugr:v0.19.0
 
 ENV HF_HOME=/models
 ENV HF_HUB_CACHE=/models

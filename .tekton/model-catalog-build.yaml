@@ -69,6 +69,31 @@ spec:
               cd "$(workspaces.source.path)/src"
               git checkout "$(params.revision)"
 
+              # Detect which model directories changed vs parent commit
+              mkdir -p "$(workspaces.source.path)/meta/build-flags"
+              PREV=$(git rev-parse HEAD~1 2>/dev/null || true)
+              if [ -z "${PREV}" ]; then
+                echo "No parent commit — flagging all models for build"
+                touch \
+                  "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" \
+                  "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"
+              else
+                CHANGED=$(git diff --name-only "${PREV}" HEAD)
+                echo "Changed files: ${CHANGED}"
+                echo "${CHANGED}" | grep -q '^Qwen3\.6-27B-NVFP4/'        && touch "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4"         || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.6-35B-A3B-NVFP4/'    && touch "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4"     || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.5-122B-A10B-NVFP4/'  && touch "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4"   || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.5-122B-A10B-INT4FP8' && touch "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" || true
+                echo "${CHANGED}" | grep -q '^Gemma-4-26B-A4B-it-NVFP4/'  && touch "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4"     || true
+                echo "${CHANGED}" | grep -q '^Qwen2\.5-32B-Instruct-GGUF' && touch "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"  || true
+              fi
+              echo "Build flags set:"
+              ls "$(workspaces.source.path)/meta/build-flags/" || echo "(none)"
+
           - name: build-and-push-qwen36-nvfp4
             image: gcr.io/kaniko-project/executor:debug
             computeResources:
@@ -83,6 +108,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4" ] && { echo "Skipping Qwen3.6-27B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.6-27B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -106,6 +132,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4" ] && { echo "Skipping Qwen3.6-35B-A3B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.6-35B-A3B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -129,6 +156,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4" ] && { echo "Skipping Qwen3.5-122B-A10B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.5-122B-A10B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -175,6 +203,7 @@ spec:
               - name: pip-cache
                 mountPath: /pip-cache
             script: |
+              [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" ] && { echo "Skipping Qwen3.5-122B-A10B-INT4FP8 — no changes detected"; exit 0; } || true
               set -eux
               apt-get update -qq && apt-get install -y --no-install-recommends \
                 docker.io python3 python3-pip python3-venv git curl >/dev/null

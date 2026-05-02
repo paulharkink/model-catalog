@@ -273,6 +273,13 @@ spec:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/gpu-worker
+                    operator: Exists
   params:
     - name: revision
       value: "{{ revision }}"

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>paulharkink/renovate-config"],
+  "regexManagers": [
+    {
+      "fileMatch": ["^versions\\.env$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>.+?)\\n[A-Z_]+=(?<currentValue>.+)"
+      ]
+    }
+  ]
+}

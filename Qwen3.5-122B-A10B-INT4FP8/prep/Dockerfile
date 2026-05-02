@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ARG ALBOND_COMMIT=42699e6a4bffecbf43ee3f26436c067eceb2a4aa
 ARG ALBOND_RAW=https://raw.githubusercontent.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4/${ALBOND_COMMIT}

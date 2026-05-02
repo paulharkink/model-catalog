@@ -185,8 +185,8 @@ spec:
 
               # Pre-pull albond's vllm base image as a speedup only — install.sh will skip
               # building vllm-sm121 if the image already exists locally.
-              docker pull "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" 2>/dev/null \
-                && docker tag "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" vllm-sm121:latest \
+              docker pull "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}" 2>/dev/null \
+                && docker tag "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}" vllm-sm121:latest \
                 || echo "vllm-sm121 not in nexus yet, install.sh will build it"
 
               # Clone albond's repo at the declared tag and run install.sh verbatim.
@@ -203,12 +203,12 @@ spec:
               fi
 
               # Retag and push to nexus
-              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
-              docker push "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
-              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
-              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
-              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
-              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
+              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
+              docker push "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
+              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
+              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
+              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
+              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
 
           - name: helm-push
             image: alpine/helm:3.17.0

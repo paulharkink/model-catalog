@@ -1,7 +1,7 @@
 services:
   vllm:
     build: .
-    image: docker.internal.phis.nl/qwen3_5_122b_a10b_nvfp4_vllm:0.19.1
+    image: docker.internal.phis.nl/vllm-qwen35-122b-a10b-nvfp4:0.19.1
     platform: linux/arm64
     network_mode: host
     ipc: host

@@ -5,23 +5,33 @@ metadata:
   namespace: ci
   annotations:
     description: |
-      Manually-triggered pipeline to build and push a vllm-eugr base image from eugr/spark-vllm-docker.
+      Build and push a vllm-eugr base image from eugr/spark-vllm-docker.
       Build args VLLM_REF, TORCH_CUDA_ARCH_LIST, FLASHINFER_CUDA_ARCH_LIST are forwarded to the Dockerfile.
       Image tag: docker.internal.phis.nl/vllm-eugr:<vllm_ref>[-tc<torch>][-fic<flashinfer>]
       Idempotent: skips if tag already exists in Nexus.
-      Usage:
+      Manual usage:
         kubectl apply -f .tekton/vllm-eugr-build.yaml   # update pipeline definition
         kubectl create -f .tekton/vllm-eugr-run.yaml    # trigger a new build run
+      Automatic: PAC triggers this pipeline when versions.env changes on main.
+        vllm_ref is read from VLLM_REF in versions.env when repo_url is provided.
 spec:
   params:
+    - name: repo_url
+      type: string
+      default: ""
+      description: source repo URL (set by PAC); when non-empty, vllm_ref is read from versions.env
+    - name: revision
+      type: string
+      default: ""
+      description: git revision of the source repo (set by PAC)
     - name: repo_ref
       type: string
       default: "main"
       description: git ref to check out from eugr/spark-vllm-docker
     - name: vllm_ref
       type: string
-      default: "main"
-      description: passed as VLLM_REF build-arg; used as the base of the image tag
+      default: ""
+      description: passed as VLLM_REF build-arg; read from versions.env when empty and repo_url is set
     - name: torch_cuda_arch_list
       type: string
       default: ""
@@ -40,6 +50,10 @@ spec:
     - name: check-and-prepare
       taskSpec:
         params:
+          - name: repo_url
+            type: string
+          - name: revision
+            type: string
           - name: repo_ref
             type: string
           - name: vllm_ref
@@ -84,7 +98,7 @@ spec:
                 mountPath: /docker-config
             script: |
               set -eux
-              apk add --no-cache openssl curl jq python3 >/dev/null 2>&1
+              apk add --no-cache openssl curl jq python3 git >/dev/null 2>&1
 
               mkdir -p "$(workspaces.eugr.path)/meta"
               : > "$(workspaces.eugr.path)/meta/image"
@@ -94,6 +108,18 @@ spec:
               : > "$(workspaces.eugr.path)/meta/skip"
 
               VLLM_REF="$(params.vllm_ref)"
+              REPO_URL="$(params.repo_url)"
+              REVISION="$(params.revision)"
+
+              if [ -z "${VLLM_REF}" ] && [ -n "${REPO_URL}" ]; then
+                TOKEN=$(/helpers/github-app-token.sh /var/secrets/github-app)
+                REPO_PATH=$(printf '%s' "${REPO_URL}" | sed -e 's#^https://github.com/##' -e 's#\.git$##')
+                git clone "https://x-access-token:${TOKEN}@github.com/${REPO_PATH}.git" /tmp/source-repo >/dev/null 2>&1
+                cd /tmp/source-repo && git checkout "${REVISION}" >/dev/null 2>&1
+                . /tmp/source-repo/versions.env
+                cd /
+              fi
+
               TORCH="$(params.torch_cuda_arch_list)"
               FLASHINFER="$(params.flashinfer_cuda_arch_list)"
 
@@ -168,6 +194,10 @@ spec:
               printf '  vllm_prs: ""\n'                                  >> build-metadata.yaml
               printf '  build_jobs: 16\n'                                >> build-metadata.yaml
       params:
+        - name: repo_url
+          value: $(params.repo_url)
+        - name: revision
+          value: $(params.revision)
         - name: repo_ref
           value: $(params.repo_ref)
         - name: vllm_ref
@@ -234,3 +264,43 @@ spec:
       workspaces:
         - name: eugr
           workspace: eugr
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: vllm-eugr-build-
+  namespace: ci
+  annotations:
+    pipelinesascode.tekton.dev/on-cel-expression: 'event == "push" && target_branch == "main" && files.any(x, x == "versions.env")'
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+spec:
+  pipelineRef:
+    name: vllm-eugr-build
+  taskRunTemplate:
+    serviceAccountName: tekton-runner
+    podTemplate:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["sparky"]
+  params:
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+    - name: torch_cuda_arch_list
+      value: "12.1a"
+    - name: flashinfer_cuda_arch_list
+      value: "12.1a"
+  workspaces:
+    - name: eugr
+      persistentVolumeClaim:
+        claimName: vllm-eugr-workspace

@@ -7,6 +7,14 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>.+?)\\n[A-Z_]+=(?<currentValue>.+)"
       ]
+    },
+    {
+      "description": "Track vllm-eugr base image tags in Dockerfiles",
+      "fileMatch": ["(^|/)Dockerfile$"],
+      "matchStrings": [
+        "ARG BASE_IMAGE=(?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
     }
   ]
 }

@@ -216,6 +216,11 @@ spec:
               echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
               apt-get update -qq && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin >/dev/null
 
+              # buildx writes state to $DOCKER_CONFIG/buildx — copy creds to a writable dir
+              mkdir -p /root/.docker
+              cp /docker-config/config.json /root/.docker/config.json
+              export DOCKER_CONFIG=/root/.docker
+
               # All version pins come from versions.env in the checked-out repo
               . "$(workspaces.source.path)/src/versions.env"
               NEXUS_TAG=$(printf '%s' "${ALBOND_INT4FP8_TAG}" | tr '[:upper:]' '[:lower:]')

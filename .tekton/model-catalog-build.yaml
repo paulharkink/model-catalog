@@ -205,8 +205,16 @@ spec:
             script: |
               [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" ] && { echo "Skipping Qwen3.5-122B-A10B-INT4FP8 — no changes detected"; exit 0; } || true
               set -eux
+              # Install docker-ce-cli + buildx (required by albond's install.sh which uses `docker build --output`)
               apt-get update -qq && apt-get install -y --no-install-recommends \
-                docker.io python3 python3-pip python3-venv git curl >/dev/null
+                ca-certificates curl gnupg python3 python3-pip python3-venv git >/dev/null
+              install -m0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null
+              chmod a+r /etc/apt/keyrings/docker.asc
+              ARCH=$(dpkg --print-architecture)
+              CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
+              echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+              apt-get update -qq && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin >/dev/null
 
               # All version pins come from versions.env in the checked-out repo
               . "$(workspaces.source.path)/src/versions.env"

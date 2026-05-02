@@ -246,13 +246,16 @@ spec:
                 docker build -t vllm-qwen35-v2-tq -f docker/Dockerfile.v2-tq .
               fi
 
+              # Derive image tag from the vllm-eugr version pinned in the INT4FP8 Dockerfile
+              VLLM_EUGR_TAG=$(grep -m1 '^ARG BASE_IMAGE=' "$(workspaces.source.path)/src/Qwen3.5-122B-A10B-INT4FP8/Dockerfile" | sed 's/.*vllm-eugr://')
+
               # Retag and push to nexus
               docker tag vllm-sm121:latest "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
               docker push "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
-              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
-              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
-              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
-              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
+              docker tag vllm-qwen35-v2:latest "docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:${VLLM_EUGR_TAG}"
+              docker push "docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:${VLLM_EUGR_TAG}"
+              docker tag vllm-qwen35-v2-tq:latest "docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:${VLLM_EUGR_TAG}"
+              docker push "docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:${VLLM_EUGR_TAG}"
 
           - name: helm-push
             image: alpine/helm:3.17.0

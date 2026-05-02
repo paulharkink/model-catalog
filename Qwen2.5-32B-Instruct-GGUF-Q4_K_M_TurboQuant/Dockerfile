@@ -1,4 +1,4 @@
-FROM docker.internal.phis.nl/llama.cpp_turboquant:cuda-12.8.1
+FROM docker.internal.phis.nl/llama-cpp-turboquant:cuda-12.8.1
 
 ENV LLAMA_CACHE=/models
 

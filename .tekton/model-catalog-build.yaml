@@ -69,6 +69,31 @@ spec:
               cd "$(workspaces.source.path)/src"
               git checkout "$(params.revision)"
 
+              # Detect which model directories changed vs parent commit
+              mkdir -p "$(workspaces.source.path)/meta/build-flags"
+              PREV=$(git rev-parse HEAD~1 2>/dev/null || true)
+              if [ -z "${PREV}" ]; then
+                echo "No parent commit — flagging all models for build"
+                touch \
+                  "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" \
+                  "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4" \
+                  "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"
+              else
+                CHANGED=$(git diff --name-only "${PREV}" HEAD)
+                echo "Changed files: ${CHANGED}"
+                echo "${CHANGED}" | grep -q '^Qwen3\.6-27B-NVFP4/'        && touch "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4"         || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.6-35B-A3B-NVFP4/'    && touch "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4"     || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.5-122B-A10B-NVFP4/'  && touch "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4"   || true
+                echo "${CHANGED}" | grep -q '^Qwen3\.5-122B-A10B-INT4FP8' && touch "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" || true
+                echo "${CHANGED}" | grep -q '^Gemma-4-26B-A4B-it-NVFP4/'  && touch "$(workspaces.source.path)/meta/build-flags/gemma4-26b-a4b-nvfp4"     || true
+                echo "${CHANGED}" | grep -q '^Qwen2\.5-32B-Instruct-GGUF' && touch "$(workspaces.source.path)/meta/build-flags/qwen25-32b-gguf-q4km-tq"  || true
+              fi
+              echo "Build flags set:"
+              ls "$(workspaces.source.path)/meta/build-flags/" || echo "(none)"
+
           - name: build-and-push-qwen36-nvfp4
             image: gcr.io/kaniko-project/executor:debug
             computeResources:
@@ -83,6 +108,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen36-27b-nvfp4" ] && { echo "Skipping Qwen3.6-27B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.6-27B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -106,6 +132,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen36-35b-a3b-nvfp4" ] && { echo "Skipping Qwen3.6-35B-A3B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.6-35B-A3B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -129,6 +156,7 @@ spec:
             command: ["/busybox/sh", "-c"]
             args:
               - |
+                [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-nvfp4" ] && { echo "Skipping Qwen3.5-122B-A10B-NVFP4 — no changes detected"; exit 0; } || true
                 set -eux
                 DEST=$(grep 'image:' /workspace/source/src/Qwen3.5-122B-A10B-NVFP4/compose.yml | awk '{print $2}')
                 /kaniko/executor \
@@ -175,9 +203,23 @@ spec:
               - name: pip-cache
                 mountPath: /pip-cache
             script: |
+              [ ! -f "$(workspaces.source.path)/meta/build-flags/qwen35-122b-a10b-int4fp8" ] && { echo "Skipping Qwen3.5-122B-A10B-INT4FP8 — no changes detected"; exit 0; } || true
               set -eux
+              # Install docker-ce-cli + buildx (required by albond's install.sh which uses `docker build --output`)
               apt-get update -qq && apt-get install -y --no-install-recommends \
-                docker.io python3 python3-pip python3-venv git curl >/dev/null
+                ca-certificates curl gnupg python3 python3-pip python3-venv git >/dev/null
+              install -m0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null
+              chmod a+r /etc/apt/keyrings/docker.asc
+              ARCH=$(dpkg --print-architecture)
+              CODENAME=$(. /etc/os-release && echo "${VERSION_CODENAME}")
+              echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+              apt-get update -qq && apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin >/dev/null
+
+              # buildx writes state to $DOCKER_CONFIG/buildx — copy creds to a writable dir
+              mkdir -p /root/.docker
+              cp /docker-config/config.json /root/.docker/config.json
+              export DOCKER_CONFIG=/root/.docker
 
               # All version pins come from versions.env in the checked-out repo
               . "$(workspaces.source.path)/src/versions.env"
@@ -185,8 +227,8 @@ spec:
 
               # Pre-pull albond's vllm base image as a speedup only — install.sh will skip
               # building vllm-sm121 if the image already exists locally.
-              docker pull "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" 2>/dev/null \
-                && docker tag "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}" vllm-sm121:latest \
+              docker pull "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}" 2>/dev/null \
+                && docker tag "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}" vllm-sm121:latest \
                 || echo "vllm-sm121 not in nexus yet, install.sh will build it"
 
               # Clone albond's repo at the declared tag and run install.sh verbatim.
@@ -203,12 +245,12 @@ spec:
               fi
 
               # Retag and push to nexus
-              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
-              docker push "docker.internal.phis.nl/albond_sm121_vllm:${NEXUS_TAG}"
-              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
-              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_vllm:0.19.0
-              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
-              docker push docker.internal.phis.nl/qwen3_5_122b_a10b_int4fp8_tq_vllm:0.19.0
+              docker tag vllm-sm121:latest "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
+              docker push "docker.internal.phis.nl/albond-sm121-vllm:${NEXUS_TAG}"
+              docker tag vllm-qwen35-v2:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
+              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8:0.19.0
+              docker tag vllm-qwen35-v2-tq:latest docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
+              docker push docker.internal.phis.nl/vllm-qwen35-122b-a10b-int4fp8-tq:0.19.0
 
           - name: helm-push
             image: alpine/helm:3.17.0

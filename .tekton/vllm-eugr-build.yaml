@@ -5,14 +5,31 @@ metadata:
   namespace: ci
   annotations:
     description: |
-      Manually-triggered pipeline to build and push a vllm-eugr base image.
-      Image label: docker.internal.phis.nl/vllm-eugr:<vllm_ref> (e.g. vllm-eugr:0.19.0)
-      Idempotent: skips build if image already exists in nexus.
+      Manually-triggered pipeline to build and push a vllm-eugr base image from eugr/spark-vllm-docker.
+      Build args VLLM_REF, TORCH_CUDA_ARCH_LIST, FLASHINFER_CUDA_ARCH_LIST are forwarded to the Dockerfile.
+      Image tag: docker.internal.phis.nl/vllm-eugr:<vllm_ref>[-tc<torch>][-fic<flashinfer>]
+      Idempotent: skips if tag already exists in Nexus.
+      Usage:
+        kubectl apply -f .tekton/vllm-eugr-build.yaml   # update pipeline definition
+        kubectl create -f .tekton/vllm-eugr-run.yaml    # trigger a new build run
 spec:
   params:
+    - name: repo_ref
+      type: string
+      default: "main"
+      description: git ref to check out from eugr/spark-vllm-docker
     - name: vllm_ref
       type: string
-      description: git ref to check out from eugr/spark-vllm-docker (e.g. v0.19.0)
+      default: "main"
+      description: passed as VLLM_REF build-arg; used as the base of the image tag
+    - name: torch_cuda_arch_list
+      type: string
+      default: ""
+      description: passed as TORCH_CUDA_ARCH_LIST build-arg if non-empty; appended as -tc<value> in image tag
+    - name: flashinfer_cuda_arch_list
+      type: string
+      default: ""
+      description: passed as FLASHINFER_CUDA_ARCH_LIST build-arg if non-empty; appended as -fic<value> in image tag
   workspaces:
     - name: eugr
   results:
@@ -23,7 +40,13 @@ spec:
     - name: check-and-prepare
       taskSpec:
         params:
+          - name: repo_ref
+            type: string
           - name: vllm_ref
+            type: string
+          - name: torch_cuda_arch_list
+            type: string
+          - name: flashinfer_cuda_arch_list
             type: string
         workspaces:
           - name: eugr
@@ -62,11 +85,30 @@ spec:
             script: |
               set -eux
               apk add --no-cache openssl curl jq python3 >/dev/null 2>&1
-              REF=$(printf '%s' "$(params.vllm_ref)" | sed 's/^v//')
-              IMAGE="docker.internal.phis.nl/vllm-eugr:${REF}"
-              printf '%s' "${IMAGE}" > /tekton/results/image
+
               mkdir -p "$(workspaces.eugr.path)/meta"
-              printf '%s\n' "${IMAGE}" > "$(workspaces.eugr.path)/meta/image"
+              : > "$(workspaces.eugr.path)/meta/image"
+              : > "$(workspaces.eugr.path)/meta/vllm_ref"
+              : > "$(workspaces.eugr.path)/meta/torch_cuda_arch_list"
+              : > "$(workspaces.eugr.path)/meta/flashinfer_cuda_arch_list"
+              : > "$(workspaces.eugr.path)/meta/skip"
+
+              VLLM_REF="$(params.vllm_ref)"
+              TORCH="$(params.torch_cuda_arch_list)"
+              FLASHINFER="$(params.flashinfer_cuda_arch_list)"
+
+              # Build image tag slug
+              SLUG="${VLLM_REF}"
+              [ -n "${TORCH}" ]      && SLUG="${SLUG}-tc${TORCH}"
+              [ -n "${FLASHINFER}" ] && SLUG="${SLUG}-fic${FLASHINFER}"
+
+              IMAGE="docker.internal.phis.nl/vllm-eugr:${SLUG}"
+              printf '%s' "${IMAGE}" > /tekton/results/image
+
+              printf '%s\n' "${IMAGE}"      > "$(workspaces.eugr.path)/meta/image"
+              printf '%s\n' "${VLLM_REF}"   > "$(workspaces.eugr.path)/meta/vllm_ref"
+              printf '%s\n' "${TORCH}"      > "$(workspaces.eugr.path)/meta/torch_cuda_arch_list"
+              printf '%s\n' "${FLASHINFER}" > "$(workspaces.eugr.path)/meta/flashinfer_cuda_arch_list"
 
               AUTH=$(python3 -c "import json; d=json.load(open('/docker-config/config.json')); print(d['auths']['docker.internal.phis.nl']['auth'])" 2>/dev/null || echo "")
               STATUS="000"
@@ -74,7 +116,7 @@ spec:
                 STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
                   -H "Authorization: Basic ${AUTH}" \
                   -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-                  "https://docker.internal.phis.nl/v2/vllm-eugr/manifests/${REF}" 2>/dev/null || echo "000")
+                  "https://docker.internal.phis.nl/v2/vllm-eugr/manifests/${SLUG}" 2>/dev/null || echo "000")
               fi
 
               if [ "${STATUS}" = "200" ]; then
@@ -92,15 +134,53 @@ spec:
               git clone "https://x-access-token:${TOKEN}@github.com/eugr/spark-vllm-docker.git" \
                 "$(workspaces.eugr.path)/src"
               cd "$(workspaces.eugr.path)/src"
-              git checkout "$(params.vllm_ref)"
+              git checkout "$(params.repo_ref)"
+
+              # Download prebuilt wheels into src/wheels/ so the Dockerfile bind-mount finds them
+              mkdir -p wheels
+              for TAG in prebuilt-flashinfer-current prebuilt-vllm-current; do
+                curl -sf \
+                  -H "Authorization: token ${TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/eugr/spark-vllm-docker/releases/tags/${TAG}" \
+                | jq -r '.assets[] | select(.name | endswith(".whl")) | .browser_download_url + " " + .name' \
+                | while IFS=' ' read -r URL NAME; do
+                    echo "Downloading ${NAME}"
+                    curl -sL -H "Authorization: token ${TOKEN}" -o "wheels/${NAME}" "${URL}"
+                  done
+              done
+
+              BASE_IMAGE=$(grep -m1 '^FROM .* AS runner' Dockerfile | awk '{print $2}')
+              REPO_COMMIT=$(git rev-parse HEAD)
+              BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+              GPU_ARCH="${TORCH:-12.1a}"
+              printf 'build_date: %s\n'            "${BUILD_DATE}"       > build-metadata.yaml
+              printf 'build_script_commit: %s\n'   "${REPO_COMMIT}"     >> build-metadata.yaml
+              printf 'vllm_version: %s\n'          "${VLLM_REF}"        >> build-metadata.yaml
+              printf 'vllm_commit: unknown\n'                            >> build-metadata.yaml
+              printf 'flashinfer_commit: unknown\n'                      >> build-metadata.yaml
+              printf 'gpu_arch: %s\n'              "${GPU_ARCH}"         >> build-metadata.yaml
+              printf 'base_image: %s\n'            "${BASE_IMAGE}"       >> build-metadata.yaml
+              printf 'build_args:\n'                                      >> build-metadata.yaml
+              printf '  vllm_ref: %s\n'            "${VLLM_REF}"        >> build-metadata.yaml
+              printf '  transformers_5: false\n'                         >> build-metadata.yaml
+              printf '  exp_mxfp4: false\n'                              >> build-metadata.yaml
+              printf '  vllm_prs: ""\n'                                  >> build-metadata.yaml
+              printf '  build_jobs: 16\n'                                >> build-metadata.yaml
       params:
+        - name: repo_ref
+          value: $(params.repo_ref)
         - name: vllm_ref
           value: $(params.vllm_ref)
+        - name: torch_cuda_arch_list
+          value: $(params.torch_cuda_arch_list)
+        - name: flashinfer_cuda_arch_list
+          value: $(params.flashinfer_cuda_arch_list)
       workspaces:
         - name: eugr
           workspace: eugr
 
-    - name: kaniko-build
+    - name: buildkit-build
       when:
         - input: $(tasks.check-and-prepare.results.skip)
           operator: in
@@ -118,61 +198,39 @@ spec:
                   path: config.json
         steps:
           - name: build
-            image: gcr.io/kaniko-project/executor:debug
+            image: moby/buildkit:latest
+            securityContext:
+              privileged: true
             computeResources:
               requests: { cpu: "4", memory: "16Gi" }
               limits: { cpu: "8", memory: "32Gi" }
             timeout: 5400s
             env:
               - name: DOCKER_CONFIG
-                value: /kaniko/.docker
+                value: /docker-config
             volumeMounts:
               - name: docker-config
-                mountPath: /kaniko/.docker
-            command: ["/busybox/sh", "-c"]
+                mountPath: /docker-config
+            command: ["/bin/sh", "-c"]
             args:
               - |
                 set -eu
-                read -r IMAGE < "$(workspaces.eugr.path)/meta/image"
-                /kaniko/executor \
-                  --dockerfile="$(workspaces.eugr.path)/src/Dockerfile" \
-                  --context="$(workspaces.eugr.path)/src" \
-                  --destination="${IMAGE}" \
-                  --skip-tls-verify \
-                  --cache=false
+                IMAGE=$(cat "$(workspaces.eugr.path)/meta/image")
+                VLLM_REF=$(cat "$(workspaces.eugr.path)/meta/vllm_ref")
+                TORCH=$(cat "$(workspaces.eugr.path)/meta/torch_cuda_arch_list")
+                FLASHINFER=$(cat "$(workspaces.eugr.path)/meta/flashinfer_cuda_arch_list")
+
+                set -- \
+                  --frontend=dockerfile.v0 \
+                  "--local=context=$(workspaces.eugr.path)/src" \
+                  "--local=dockerfile=$(workspaces.eugr.path)/src" \
+                  "--output=type=image,name=${IMAGE},push=true,registry.insecure=true"
+                [ -n "${VLLM_REF}" ]   && set -- "$@" "--opt=build-arg:VLLM_REF=${VLLM_REF}"
+                [ -n "${TORCH}" ]      && set -- "$@" "--opt=build-arg:TORCH_CUDA_ARCH_LIST=${TORCH}"
+                [ -n "${FLASHINFER}" ] && set -- "$@" "--opt=build-arg:FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER}"
+
+                buildctl-daemonless.sh build "$@"
+
       workspaces:
         - name: eugr
           workspace: eugr
----
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  generateName: vllm-eugr-build-
-  namespace: ci
-  annotations:
-    description: |
-      Manual trigger for building a vllm-eugr base image.
-      Run: kubectl create -f this-file (generateName creates a new PipelineRun each time).
-spec:
-  pipelineRef:
-    name: vllm-eugr-build
-  taskRunTemplate:
-    serviceAccountName: tekton-runner
-    podTemplate:
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/gpu-worker
-                    operator: Exists
-  params:
-    - name: vllm_ref
-      value: "v0.19.0"
-  workspaces:
-    - name: eugr
-      emptyDir: {}

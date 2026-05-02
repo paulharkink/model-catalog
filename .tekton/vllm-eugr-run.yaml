@@ -17,14 +17,6 @@ spec:
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: kubernetes.io/hostname
-                    operator: In
-                    values: ["sparky"]
   params:
     - name: vllm_ref
       value: "v0.20.1"

@@ -1,0 +1,40 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: vllm-eugr-build-
+  namespace: ci
+  annotations:
+    description: |
+      Manual trigger for building a vllm-eugr base image.
+      Edit params, then: kubectl create -f .tekton/vllm-eugr-run.yaml
+spec:
+  pipelineRef:
+    name: vllm-eugr-build
+  taskRunTemplate:
+    serviceAccountName: tekton-runner
+    podTemplate:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values: ["sparky"]
+  params:
+    - name: vllm_ref
+      value: "v0.20.1"
+    # - name: torch_cuda_arch_list
+    #   value: "12.1a"
+    # - name: flashinfer_cuda_arch_list
+    #   value: "12.1a"
+    # - name: repo_ref
+    #   value: "main"
+  workspaces:
+    - name: eugr
+      persistentVolumeClaim:
+        claimName: vllm-eugr-workspace
